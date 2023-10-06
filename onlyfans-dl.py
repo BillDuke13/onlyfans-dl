@@ -13,10 +13,17 @@ import os
 import sys
 import json
 import shutil
+
+import boto3
 import requests
 import time
 import datetime as dt
 import hashlib
+
+from botocore.exceptions import ClientError
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # maximum number of posts to index
 # DONT CHANGE THAT
@@ -285,6 +292,36 @@ def get_all_messages(messages):
 
     return messages
 
+
+
+def save_file_to_s3(file_name, bucket, object_name=None):
+    """Upload a file or directory to an S3 bucket"""
+    s3_client = boto3.client('s3',
+                      endpoint_url=os.getenv("S3_ENDPOINT_URL"),
+                      aws_access_key_id=os.getenv("AWS_AK"),
+                      aws_secret_access_key=os.getenv("AWS_SK"))
+
+
+    if os.path.isfile(file_name):
+        try:
+            response = s3_client.upload_file(file_name, bucket, object_name)
+        except ClientError as e:
+            print(e)
+            return False
+        return True
+    elif os.path.isdir(file_name):
+        for root, dirs, files in os.walk(file_name):
+            for file in files:
+                file_path = os.path.join(root, file)
+                object_path = os.path.join(object_name, file_path.replace(file_name+'/', ''))
+                try:
+                    response = s3_client.upload_file(file_path, bucket, object_path)
+                except ClientError as e:
+                    print(e)
+        return True
+    else:
+        print(f"{file_name} is neither a file nor a directory.")
+
 def get_id_from_path(path):
     last_index = path.rfind("/")
     second_last_index = path.rfind("/", 0, last_index - 1)
@@ -466,4 +503,13 @@ if __name__ == "__main__":
         cur_count = download_posts(cur_count, video_posts, False)
         download_posts(cur_count, archived_posts, True)
         download_messages(messages)
+        if 'AWS_AK' in os.environ and 'AWS_SK' in os.environ:
+            print("Uploading to S3...")
+            paths = ["", "/messages", "/archived", "/avatar", "/header", "/photos", "/videos"]
+
+            for path in paths:
+                full_path = f"profiles/{PROFILE}{path}"
+                save_file_to_s3(full_path, os.getenv("S3_BUCKET"), full_path)
+        else:
+            pass
         print("Downloaded " + str(new_files) + " new files.")
