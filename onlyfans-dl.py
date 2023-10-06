@@ -211,7 +211,7 @@ def download_public_files():
 
 
 # download a media item and save it to the relevant directory
-def download_media(media, is_archived):
+def download_media(media, is_archived, is_message=False):
     id = str(media["id"])
     source = media["source"]["source"]
 
@@ -233,6 +233,8 @@ def download_media(media, is_archived):
 
     if is_archived:
         path = "/archived/"
+    elif is_message:
+        path = "/messages/"
     else:
         path = "/"
     path += type + "s/" + id + ext
@@ -251,6 +253,37 @@ def download_file(source, path):
         r.raw.decode_content = True
         shutil.copyfileobj(r.raw, f)
 
+def download_messages(message_list):
+    for k, msg in enumerate(message_list, start=1):
+        if "media" not in msg:
+            continue
+
+        for media in msg["media"]:
+            if "canView" in media and not media["canView"]:
+                continue
+
+            if "source" in media:
+                download_media(media, is_archived=False, is_message=True)
+
+def get_all_messages(messages):
+    len_msgs = len(messages)
+    print(len_msgs, "messages downloaded")
+    has_more_msgs = False
+    if len_msgs == POST_LIMIT:
+        has_more_msgs = True
+
+    while has_more_msgs:
+        has_more_msgs = False
+        len_msgs = len(messages)
+        extra_msg_posts = api_request("/chats/" + PROFILE_ID + "/messages",
+                                        getdata={"limit": str(POST_LIMIT), "order": "asc",
+                                                 "offset": str(len_msgs)}
+                                        )
+        messages.extend(extra_msg_posts["list"])
+        if len(extra_msg_posts["list"]) == POST_LIMIT:
+            has_more_msgs = True
+
+    return messages
 
 def get_id_from_path(path):
     last_index = path.rfind("/")
@@ -349,7 +382,7 @@ if __name__ == "__main__":
 
     # Get the rules for the signed headers dynamically, as they may be fluid
     dynamic_rules = requests.get(
-        'https://raw.githubusercontent.com/DATAHOARDERS/dynamic-rules/main/onlyfans.json').json()
+        'https://raw.githubusercontent.com/DIGITALCRIMINALS/dynamic-rules/main/onlyfans.json').json()
     # Create Header
     API_HEADER = create_auth()
 
@@ -378,6 +411,9 @@ if __name__ == "__main__":
         assure_dir("profiles/" + PROFILE + "/archived")
         assure_dir("profiles/" + PROFILE + "/archived/photos")
         assure_dir("profiles/" + PROFILE + "/archived/videos")
+        assure_dir("profiles/" + PROFILE + "/messages")
+        assure_dir("profiles/" + PROFILE + "/messages/photos")
+        assure_dir("profiles/" + PROFILE + "/messages/videos")
 
         # first save profile info
         print("Saving profile info...")
@@ -398,6 +434,8 @@ if __name__ == "__main__":
             json.dump(sinf, infojson)
 
         download_public_files()
+        messages = api_request("/chats/" + PROFILE_ID + "/messages", getdata={"limit": str(POST_LIMIT), "order": "asc"})
+        messages = get_all_messages(messages["list"])
 
         # get all user posts
         print("Finding photos...", end=' ', flush=True)
@@ -427,5 +465,5 @@ if __name__ == "__main__":
         cur_count = download_posts(1, photo_posts, False)
         cur_count = download_posts(cur_count, video_posts, False)
         download_posts(cur_count, archived_posts, True)
-
+        download_messages(messages)
         print("Downloaded " + str(new_files) + " new files.")
